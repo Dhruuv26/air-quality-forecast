@@ -1,0 +1,39 @@
+name: Collect air quality data
+
+on:
+  schedule:
+    # runs at the top of every hour (UTC) — GitHub Actions cron does not
+    # guarantee exact timing under load, expect a few minutes of drift
+    - cron: "0 * * * *"
+  workflow_dispatch: {}  # lets you trigger a manual run from the Actions tab, useful for testing
+
+permissions:
+  contents: write  # needed to commit collected data back to the repo
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run collection
+        env:
+          DATA_GOV_IN_API_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+          OPENWEATHERMAP_API_KEY: ${{ secrets.OPENWEATHERMAP_API_KEY }}
+          NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
+        run: python src/ingestion/collect_all.py
+
+      - name: Commit new data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/raw/*.csv
+          git diff --staged --quiet && echo "No new data to commit" || git commit -m "Scheduled data collection $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push

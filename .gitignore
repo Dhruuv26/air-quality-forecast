@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# NOTE: src/models/artifacts/ and data/processed/ are intentionally NOT
+# ignored. The scheduled alert workflow and a Streamlit Cloud deployment
+# both run from a fresh checkout and read saved artifacts rather than
+# training — if these aren't committed, both break.
