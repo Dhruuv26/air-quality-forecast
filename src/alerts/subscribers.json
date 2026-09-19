@@ -1,0 +1,21 @@
+{
+  "_comment": "Alert subscribers. min_band is the AQI band at which this person wants to be notified — anything at or worse than it triggers. Valid: Good, Satisfactory, Moderate, Poor, Very Poor, Severe. Someone with asthma might set Moderate; a general user might set Poor. cooldown_hours prevents re-alerting for the same ongoing episode.",
+  "defaults": {
+    "cooldown_hours": 12
+  },
+  "subscribers": [
+    {
+      "name": "Example User",
+      "email": "you@example.com",
+      "cities": ["Chennai", "Vellore"],
+      "min_band": "Poor"
+    },
+    {
+      "name": "Example Sensitive User",
+      "email": "sensitive@example.com",
+      "cities": ["Chennai"],
+      "min_band": "Moderate",
+      "cooldown_hours": 24
+    }
+  ]
+}

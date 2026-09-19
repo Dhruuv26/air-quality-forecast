@@ -1,0 +1,60 @@
+name: Send air quality alerts
+
+on:
+  schedule:
+    # every 6 hours — alert checks don't need to be hourly, since the
+    # cooldown would suppress most runs anyway. Less noise in the logs.
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (print only, do not send)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write  # needed to commit alert_state.json back
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run alert logic tests
+        # if the dedup logic is broken, do NOT proceed to send anything
+        run: python src/alerts/test_alert_engine.py
+
+      - name: Rebuild features from latest collected data
+        # the collect workflow commits data/raw/*.csv; features.csv must be
+        # regenerated from it so alerts run on current readings, not stale ones
+        run: python src/features/build_features.py
+
+      - name: Check for alerts
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python src/alerts/run_alerts.py
+          else
+            python src/alerts/run_alerts.py --send
+          fi
+
+      - name: Commit alert state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/alerts/alert_state.json
+          git diff --staged --quiet && echo "No state change" || git commit -m "Update alert state $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
