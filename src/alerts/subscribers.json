@@ -6,13 +6,13 @@
   "subscribers": [
     {
       "name": "Example User",
-      "email": "you@example.com",
+      "email": "nairdhruuv@gmail.com",
       "cities": ["Chennai", "Vellore"],
-      "min_band": "Poor"
+      "min_band": "Moderate"
     },
     {
       "name": "Example Sensitive User",
-      "email": "sensitive@example.com",
+      "email": "nairdhruuv@gmail.com",
       "cities": ["Chennai"],
       "min_band": "Moderate",
       "cooldown_hours": 24
