@@ -32,6 +32,8 @@ def load_and_pivot_cpcb(path: str = f"{RAW_DIR}/cpcb_history.csv") -> pd.DataFra
         df["last_update"] = pd.to_datetime(df["last_update"], format="%d-%m-%Y %H:%M:%S")
     except ValueError:
         df["last_update"] = pd.to_datetime(df["last_update"])
+    if df["last_update"].dt.tz is not None:  # defensive: see note in load_weather()
+        df["last_update"] = df["last_update"].dt.tz_localize(None)
     df["last_update"] = df["last_update"].dt.floor("h")
 
     pivoted = df.pivot_table(
@@ -53,6 +55,13 @@ def load_and_pivot_cpcb(path: str = f"{RAW_DIR}/cpcb_history.csv") -> pd.DataFra
 
 def load_weather(path: str = f"{RAW_DIR}/weather_history.csv") -> pd.DataFrame:
     df = pd.read_csv(path, parse_dates=["fetched_at"])
+    # fetched_at is written as an ISO string with a UTC offset (see
+    # weather_client.py), so pandas parses it tz-aware. CPCB's last_update
+    # has no timezone info at all and is parsed naive. Merging naive and
+    # aware datetime columns raises a ValueError, so drop the tz here —
+    # everything downstream treats timestamps as naive local time anyway.
+    if df["fetched_at"].dt.tz is not None:
+        df["fetched_at"] = df["fetched_at"].dt.tz_localize(None)
     df["fetched_at"] = df["fetched_at"].dt.floor("h")
     return df.rename(columns={"fetched_at": "timestamp"})
 
