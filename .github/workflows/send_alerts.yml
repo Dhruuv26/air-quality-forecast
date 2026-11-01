@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write  # needed to commit alert_state.json back
 
+concurrency:
+  group: data-commits
+  cancel-in-progress: false
+
 jobs:
   alert:
     runs-on: ubuntu-latest
@@ -57,4 +61,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add src/alerts/alert_state.json
           git diff --staged --quiet && echo "No state change" || git commit -m "Update alert state $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git pull --rebase
           git push

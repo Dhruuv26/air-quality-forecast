@@ -2,13 +2,17 @@ name: Collect air quality data
 
 on:
   schedule:
-    # runs at the top of every hour (UTC) — GitHub Actions cron does not
-    # guarantee exact timing under load, expect a few minutes of drift
-    - cron: "0 * * * *"
-  workflow_dispatch: {}  # lets you trigger a manual run from the Actions tab, useful for testing
+    # every 6 hours; the air/weather step re-fetches the last 7 days and
+    # de-duplicates, so a skipped or throttled run loses nothing
+    - cron: "17 */6 * * *"
+  workflow_dispatch: {}
 
 permissions:
   contents: write  # needed to commit collected data back to the repo
+
+concurrency:
+  group: data-commits
+  cancel-in-progress: false
 
 jobs:
   collect:
@@ -23,17 +27,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run collection
+      - name: Refresh air quality + weather (last 7 days, idempotent)
         env:
-          DATA_GOV_IN_API_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
           OPENWEATHERMAP_API_KEY: ${{ secrets.OPENWEATHERMAP_API_KEY }}
+        run: python src/ingestion/backfill_real.py --recent 7
+
+      - name: Collect fire hotspots
+        if: always()
+        continue-on-error: true
+        env:
           NASA_FIRMS_MAP_KEY: ${{ secrets.NASA_FIRMS_MAP_KEY }}
-        run: python src/ingestion/collect_all.py
+        run: python src/ingestion/firms_client.py
 
       - name: Commit new data
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/raw/*.csv
           git diff --staged --quiet && echo "No new data to commit" || git commit -m "Scheduled data collection $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git pull --rebase
           git push

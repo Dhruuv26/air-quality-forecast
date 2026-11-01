@@ -1,0 +1,44 @@
+name: Rebuild features
+
+on:
+  schedule:
+    # daily, ~07:00 IST. Collection runs every 6h, so raw data is at most
+    # ~6h old here. Models are NOT retrained automatically (retraining needs a
+    # human to review the metrics first).
+    - cron: "30 1 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # commits features.csv back so the deployed dashboard refreshes
+
+concurrency:
+  group: data-commits
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rebuild features table
+        run: python src/features/build_features.py
+
+      - name: Sanity-check the table (fails the run instead of deploying a bad file)
+        run: python src/features/check_features.py
+
+      - name: Commit features
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/processed/features.csv
+          git diff --staged --quiet && echo "No change" || git commit -m "Daily features rebuild $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git pull --rebase
+          git push
