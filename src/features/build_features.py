@@ -60,13 +60,28 @@ def load_and_pivot_cpcb(path: str = f"{RAW_DIR}/cpcb_history.csv") -> pd.DataFra
     return pivoted.rename(columns={"last_update": "timestamp"})
 
 
+_NAIVE_TS = r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}$"
+
+
 def load_weather(path: str = f"{RAW_DIR}/weather_history.csv") -> pd.DataFrame:
-    df = pd.read_csv(path, parse_dates=["fetched_at"])
-    # fetched_at is written as an ISO string with a UTC offset (see
-    # weather_client.py), so pandas parses it tz-aware. CPCB's last_update
-    # has no timezone info at all and is parsed naive. Merging naive and
-    # aware datetime columns raises a ValueError, so drop the tz here —
-    # everything downstream treats timestamps as naive local time anyway.
+    df = pd.read_csv(path)
+    ts = df["fetched_at"].astype(str)
+
+    # Real-data files (backfill_real.py) hold naive IST timestamps. The old live
+    # collector wrote UTC timestamps WITH an offset ("...+00:00"), and a file
+    # holding both kinds cannot be parsed as one column. If both are present,
+    # keep the IST rows and drop the legacy ones. (A file that is entirely
+    # offset-stamped, e.g. synthetic data, is still parsed as before.)
+    naive = ts.str.match(_NAIVE_TS)
+    if naive.any() and not naive.all():
+        print(f"load_weather: dropping {int((~naive).sum())} legacy rows with UTC/offset timestamps")
+        df, ts = df[naive].copy(), ts[naive]
+
+    # ISO8601 accepts rows with and without fractional seconds in one column
+    df["fetched_at"] = pd.to_datetime(ts, format="ISO8601")
+    # CPCB's last_update has no timezone and is parsed naive; merging naive and
+    # aware columns raises, so drop any tz here - everything downstream treats
+    # timestamps as naive local time anyway.
     if df["fetched_at"].dt.tz is not None:
         df["fetched_at"] = df["fetched_at"].dt.tz_localize(None)
     df["fetched_at"] = df["fetched_at"].dt.floor("h")
