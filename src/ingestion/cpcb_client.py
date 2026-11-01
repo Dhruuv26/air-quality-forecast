@@ -49,20 +49,15 @@ def _get(url: str, timeout: int) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def fetch_current_aqi(state: str | None = None, limit: int = 2000,
-                       max_retries: int = 3, timeout: int = 30) -> pd.DataFrame:
+def fetch_current_aqi(state: str | None = None, limit: int = 1000,
+                      max_retries: int = 3, timeout: int = 30,
+                      max_pages: int = 10) -> pd.DataFrame:
     """
-    Fetch current-hour AQI readings.
+    Fetch current-hour AQI readings, paging through the WHOLE resource.
 
-    state: server-side filter value is unconfirmed against this dataset (the
-    docs' `filters[state]` example did not reliably return Tamil Nadu rows
-    in testing) — left as None by default, filtering happens client-side
-    in fetch_all_tn_cities() instead, against the always-correct `city`
-    column. Pass a state explicitly only if you've confirmed the exact
-    string this dataset expects.
-
-    limit: this resource has 3500+ total records across all of India: a
-    limit of 100 can silently truncate before reaching Tamil Nadu rows.
+    `limit` is the page size. The resource has 3500+ records nationwide, so a
+    single request can silently miss Tamil Nadu rows; we keep requesting
+    pages (offset += limit) until a short page or the reported total.
     """
     api_key = os.environ.get("DATA_GOV_IN_API_KEY")
     if not api_key:
@@ -70,41 +65,47 @@ def fetch_current_aqi(state: str | None = None, limit: int = 2000,
             "Set DATA_GOV_IN_API_KEY. Get a free key at https://data.gov.in/user/register"
         )
 
-    params = {
-        "api-key": api_key,
-        "format": "json",
-        "limit": limit,
-    }
-    if state:
-        params["filters[state]"] = state
+    frames = []
+    offset = 0
+    for _ in range(max_pages):
+        params = {"api-key": api_key, "format": "json",
+                  "limit": limit, "offset": offset}
+        if state:
+            params["filters[state]"] = state
+        url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
 
-    url = f"{BASE_URL}?{urllib.parse.urlencode(params)}"
+        payload, last_error = None, None
+        for attempt in range(1, max_retries + 1):
+            try:
+                payload = _get(url, timeout=timeout)
+                break
+            except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+                last_error = e
+                print(f"  attempt {attempt}/{max_retries} failed: {e}")
+                if attempt < max_retries:
+                    time.sleep(5 * attempt)
+        if payload is None:
+            raise last_error
 
-    last_error = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            payload = _get(url, timeout=timeout)
-            records = payload.get("records", [])
-            if not records:
-                return pd.DataFrame()
-            df = pd.DataFrame(records)
-            df["fetched_at"] = datetime.now(timezone.utc).isoformat()
-            return df
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-            last_error = e
-            print(f"  attempt {attempt}/{max_retries} failed: {e}")
-            if attempt < max_retries:
-                wait = 5 * attempt  # 5s, then 10s
-                print(f"  retrying in {wait}s...")
-                time.sleep(wait)
+        records = payload.get("records", [])
+        if records:
+            frames.append(pd.DataFrame(records))
+        offset += limit
+        total = int(payload.get("total", 0) or 0)
+        if len(records) < limit or (total and offset >= total):
+            break
 
-    raise last_error
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True)
+    df["fetched_at"] = datetime.now(timezone.utc).isoformat()
+    return df
 
 
 def fetch_all_tn_cities() -> pd.DataFrame:
     """Fetch nationwide data (no server-side filter — see note above) and
     keep only rows for tracked Tamil Nadu cities."""
-    df = fetch_current_aqi(state=None, limit=2000)
+    df = fetch_current_aqi(state=None, limit=1000)
     if df.empty:
         return df
     return df[df["city"].isin(TN_CITIES)].reset_index(drop=True)
