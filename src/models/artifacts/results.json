@@ -1,0 +1,269 @@
+{
+  "24h": {
+    "baseline": {
+      "mae": 20.934059753954305,
+      "rmse": 30.61926659505385
+    },
+    "model": {
+      "mae": 21.748943547528555,
+      "rmse": 33.458496988566125
+    },
+    "improvement_pct": -3.892621895379485,
+    "interval_coverage": 0.6579964850615114,
+    "interval_coverage_raw": 0.45834797891036905,
+    "interval_offset": 7.142438770071735,
+    "interval_nominal": 0.8,
+    "top_features": [
+      {
+        "feature": "aqi_proxy",
+        "mean_abs_shap": 9.836
+      },
+      {
+        "feature": "CO",
+        "mean_abs_shap": 2.121
+      },
+      {
+        "feature": "aqi_proxy_roll_mean_72h",
+        "mean_abs_shap": 1.794
+      },
+      {
+        "feature": "hour_cos",
+        "mean_abs_shap": 1.779
+      },
+      {
+        "feature": "OZONE",
+        "mean_abs_shap": 1.76
+      },
+      {
+        "feature": "aqi_proxy_lag_48h",
+        "mean_abs_shap": 1.697
+      },
+      {
+        "feature": "pressure_hpa",
+        "mean_abs_shap": 1.438
+      },
+      {
+        "feature": "hour",
+        "mean_abs_shap": 1.282
+      },
+      {
+        "feature": "wind_deg",
+        "mean_abs_shap": 1.24
+      },
+      {
+        "feature": "aqi_proxy_lag_1h",
+        "mean_abs_shap": 1.088
+      }
+    ],
+    "feature_cols": [
+      "CO",
+      "NO2",
+      "OZONE",
+      "PM10",
+      "PM2.5",
+      "SO2",
+      "aqi_proxy",
+      "temp_c",
+      "humidity_pct",
+      "pressure_hpa",
+      "wind_speed_ms",
+      "wind_deg",
+      "clouds_pct",
+      "fire_count",
+      "fire_mean_frp",
+      "aqi_proxy_lag_1h",
+      "aqi_proxy_lag_3h",
+      "aqi_proxy_lag_6h",
+      "aqi_proxy_lag_12h",
+      "aqi_proxy_lag_24h",
+      "aqi_proxy_lag_48h",
+      "aqi_proxy_roll_mean_6h",
+      "aqi_proxy_roll_std_6h",
+      "aqi_proxy_roll_mean_24h",
+      "aqi_proxy_roll_std_24h",
+      "aqi_proxy_roll_mean_72h",
+      "aqi_proxy_roll_std_72h",
+      "hour",
+      "hour_sin",
+      "hour_cos"
+    ]
+  },
+  "48h": {
+    "baseline": {
+      "mae": 27.50165137614679,
+      "rmse": 39.84250369790321
+    },
+    "model": {
+      "mae": 25.331526288418697,
+      "rmse": 38.14342842417764
+    },
+    "improvement_pct": 7.890890107094887,
+    "interval_coverage": 0.6634862385321101,
+    "interval_coverage_raw": 0.44807339449541284,
+    "interval_offset": 10.553820463244591,
+    "interval_nominal": 0.8,
+    "top_features": [
+      {
+        "feature": "hour",
+        "mean_abs_shap": 5.073
+      },
+      {
+        "feature": "aqi_proxy",
+        "mean_abs_shap": 3.065
+      },
+      {
+        "feature": "PM2.5",
+        "mean_abs_shap": 2.808
+      },
+      {
+        "feature": "PM10",
+        "mean_abs_shap": 2.042
+      },
+      {
+        "feature": "pressure_hpa",
+        "mean_abs_shap": 1.824
+      },
+      {
+        "feature": "aqi_proxy_roll_mean_72h",
+        "mean_abs_shap": 1.793
+      },
+      {
+        "feature": "aqi_proxy_roll_std_72h",
+        "mean_abs_shap": 1.298
+      },
+      {
+        "feature": "hour_cos",
+        "mean_abs_shap": 1.291
+      },
+      {
+        "feature": "wind_deg",
+        "mean_abs_shap": 1.139
+      },
+      {
+        "feature": "CO",
+        "mean_abs_shap": 1.117
+      }
+    ],
+    "feature_cols": [
+      "CO",
+      "NO2",
+      "OZONE",
+      "PM10",
+      "PM2.5",
+      "SO2",
+      "aqi_proxy",
+      "temp_c",
+      "humidity_pct",
+      "pressure_hpa",
+      "wind_speed_ms",
+      "wind_deg",
+      "clouds_pct",
+      "fire_count",
+      "fire_mean_frp",
+      "aqi_proxy_lag_1h",
+      "aqi_proxy_lag_3h",
+      "aqi_proxy_lag_6h",
+      "aqi_proxy_lag_12h",
+      "aqi_proxy_lag_24h",
+      "aqi_proxy_lag_48h",
+      "aqi_proxy_roll_mean_6h",
+      "aqi_proxy_roll_std_6h",
+      "aqi_proxy_roll_mean_24h",
+      "aqi_proxy_roll_std_24h",
+      "aqi_proxy_roll_mean_72h",
+      "aqi_proxy_roll_std_72h",
+      "hour",
+      "hour_sin",
+      "hour_cos"
+    ]
+  },
+  "72h": {
+    "baseline": {
+      "mae": 32.50848368522073,
+      "rmse": 45.05135478693394
+    },
+    "model": {
+      "mae": 29.11257887253887,
+      "rmse": 43.105271301509724
+    },
+    "improvement_pct": 10.44621104313683,
+    "interval_coverage": 0.6775431861804223,
+    "interval_coverage_raw": 0.454510556621881,
+    "interval_offset": 13.327562093895445,
+    "interval_nominal": 0.8,
+    "top_features": [
+      {
+        "feature": "hour",
+        "mean_abs_shap": 5.337
+      },
+      {
+        "feature": "PM2.5",
+        "mean_abs_shap": 3.401
+      },
+      {
+        "feature": "pressure_hpa",
+        "mean_abs_shap": 1.838
+      },
+      {
+        "feature": "hour_cos",
+        "mean_abs_shap": 1.721
+      },
+      {
+        "feature": "CO",
+        "mean_abs_shap": 1.206
+      },
+      {
+        "feature": "aqi_proxy_roll_mean_72h",
+        "mean_abs_shap": 1.199
+      },
+      {
+        "feature": "wind_deg",
+        "mean_abs_shap": 1.149
+      },
+      {
+        "feature": "PM10",
+        "mean_abs_shap": 0.855
+      },
+      {
+        "feature": "hour_sin",
+        "mean_abs_shap": 0.713
+      },
+      {
+        "feature": "aqi_proxy_roll_std_72h",
+        "mean_abs_shap": 0.544
+      }
+    ],
+    "feature_cols": [
+      "CO",
+      "NO2",
+      "OZONE",
+      "PM10",
+      "PM2.5",
+      "SO2",
+      "aqi_proxy",
+      "temp_c",
+      "humidity_pct",
+      "pressure_hpa",
+      "wind_speed_ms",
+      "wind_deg",
+      "clouds_pct",
+      "fire_count",
+      "fire_mean_frp",
+      "aqi_proxy_lag_1h",
+      "aqi_proxy_lag_3h",
+      "aqi_proxy_lag_6h",
+      "aqi_proxy_lag_12h",
+      "aqi_proxy_lag_24h",
+      "aqi_proxy_lag_48h",
+      "aqi_proxy_roll_mean_6h",
+      "aqi_proxy_roll_std_6h",
+      "aqi_proxy_roll_mean_24h",
+      "aqi_proxy_roll_std_24h",
+      "aqi_proxy_roll_mean_72h",
+      "aqi_proxy_roll_std_72h",
+      "hour",
+      "hour_sin",
+      "hour_cos"
+    ]
+  }
+}

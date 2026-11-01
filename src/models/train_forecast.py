@@ -3,8 +3,15 @@ Trains and evaluates forecast models for each horizon (24h/48h/72h):
   1. Naive persistence baseline (tomorrow = today) — the bar any real model must clear
   2. LightGBM regressor per horizon, with SHAP explainability
 
-Uses a time-aware train/test split (NOT random shuffle — that would leak
-future information into training, since consecutive hours are correlated).
+Evaluation design (chronological, no shuffling):
+  fit   : earliest part of the data, trains the models
+  calib : middle slice, used for early stopping AND for conformal calibration
+          of the prediction intervals
+  test  : latest slice, touched ONLY for the reported metrics
+A purge gap of 72h separates the slices. Row t's target is the AQI at t+h, so
+without the gap a fit row near a boundary would carry labels from the NEXT
+slice (leakage). Early stopping used to run on the test set itself, which made
+the reported test metrics optimistic; that is fixed here.
 
 Run: python src/models/train_forecast.py
 """
@@ -15,21 +22,40 @@ import lightgbm as lgb
 import shap
 import json
 import os
+import warnings
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+warnings.filterwarnings("ignore", message=".*eval_set.*")  # noisy LightGBM deprecation
 
 FEATURES_PATH = "data/processed/features.csv"
 MODEL_DIR = "src/models/artifacts"
 HORIZONS = [24, 48, 72]
 
-NON_FEATURE_COLS = ["city", "timestamp"] + [f"target_{h}h" for h in HORIZONS]
+# Calendar columns that act as "which period is this?" labels when the data
+# spans only ~4 months: a tree can use month=7,8,9 to memorise the training
+# period, and month=10/11 at test time was never seen. Weekday effects can't
+# be learned from ~15 weeks either. Excluded from the features (not from the CSV).
+DROP_FEATURES = ["month", "day_of_week", "is_weekend"]
+
+NON_FEATURE_COLS = ["city", "timestamp"] + [f"target_{h}h" for h in HORIZONS] + DROP_FEATURES
 
 
-def time_aware_split(df: pd.DataFrame, test_frac: float = 0.2):
+def time_aware_split(df: pd.DataFrame, test_frac: float = 0.2,
+                     calib_frac: float = 0.15, purge_hours: int = max(HORIZONS)):
+    """Chronological fit / calib / test with a purge gap before each boundary."""
     df = df.sort_values("timestamp")
-    cutoff = df["timestamp"].quantile(1 - test_frac)
-    train = df[df["timestamp"] < cutoff]
-    test = df[df["timestamp"] >= cutoff]
-    return train, test
+    t_test = df["timestamp"].quantile(1 - test_frac)
+    t_calib = df["timestamp"].quantile(1 - test_frac - calib_frac)
+    gap = pd.Timedelta(hours=purge_hours)
+    fit = df[df["timestamp"] < t_calib - gap]
+    calib = df[(df["timestamp"] >= t_calib) & (df["timestamp"] < t_test - gap)]
+    test = df[df["timestamp"] >= t_test]
+    return fit, calib, test
+
+
+def _xy(df: pd.DataFrame, feature_cols: list, target_col: str):
+    d = df.dropna(subset=[target_col])
+    return d[feature_cols], d[target_col]
 
 
 def naive_persistence_baseline(test: pd.DataFrame, horizon: int) -> dict:
@@ -42,15 +68,13 @@ def naive_persistence_baseline(test: pd.DataFrame, horizon: int) -> dict:
     }
 
 
-def train_lightgbm(train: pd.DataFrame, test: pd.DataFrame, horizon: int):
+def train_lightgbm(fit: pd.DataFrame, calib: pd.DataFrame, test: pd.DataFrame, horizon: int):
     target_col = f"target_{horizon}h"
-    feature_cols = [c for c in train.columns if c not in NON_FEATURE_COLS]
+    feature_cols = [c for c in fit.columns if c not in NON_FEATURE_COLS]
 
-    train_valid = train.dropna(subset=[target_col])
-    test_valid = test.dropna(subset=[target_col])
-
-    X_train, y_train = train_valid[feature_cols], train_valid[target_col]
-    X_test, y_test = test_valid[feature_cols], test_valid[target_col]
+    X_fit, y_fit = _xy(fit, feature_cols, target_col)
+    X_cal, y_cal = _xy(calib, feature_cols, target_col)
+    X_test, y_test = _xy(test, feature_cols, target_col)
 
     model = lgb.LGBMRegressor(
         n_estimators=500,
@@ -62,9 +86,10 @@ def train_lightgbm(train: pd.DataFrame, test: pd.DataFrame, horizon: int):
         random_state=42,
         verbosity=-1,
     )
+    # early stopping watches the CALIB slice, never the test slice
     model.fit(
-        X_train, y_train,
-        eval_set=[(X_test, y_test)],
+        X_fit, y_fit,
+        eval_set=[(X_cal, y_cal)],
         callbacks=[lgb.early_stopping(30, verbose=False)],
     )
 
@@ -76,23 +101,22 @@ def train_lightgbm(train: pd.DataFrame, test: pd.DataFrame, horizon: int):
     return model, metrics, feature_cols, X_test
 
 
-def train_quantile_models(train: pd.DataFrame, test: pd.DataFrame, horizon: int,
-                          quantiles=(0.1, 0.9)) -> dict:
+def train_quantile_models(fit: pd.DataFrame, calib: pd.DataFrame, test: pd.DataFrame,
+                          horizon: int, quantiles=(0.1, 0.9)) -> dict:
     """
-    Train quantile regressors so the dashboard can show a real prediction
-    interval instead of a made-up error band. p10/p90 gives an 80% interval.
-
-    These are separate models from the point forecast — LightGBM's quantile
-    objective optimizes pinball loss, not MSE, so you can't get intervals
-    out of the main model for free.
+    p10/p90 quantile regressors, then conformalized quantile regression (CQR):
+    the raw band is widened (or narrowed) by `offset`, the finite-sample
+    quantile of how far calibration actuals fell outside the band. That makes
+    coverage honest instead of whatever the pinball-loss fit happened to give.
+    Assumes calib and test look alike; a season shift can still under-cover,
+    which is why the raw and calibrated test coverage are both reported.
     """
     target_col = f"target_{horizon}h"
-    feature_cols = [c for c in train.columns if c not in NON_FEATURE_COLS]
+    feature_cols = [c for c in fit.columns if c not in NON_FEATURE_COLS]
 
-    train_valid = train.dropna(subset=[target_col])
-    test_valid = test.dropna(subset=[target_col])
-    X_train, y_train = train_valid[feature_cols], train_valid[target_col]
-    X_test, y_test = test_valid[feature_cols], test_valid[target_col]
+    X_fit, y_fit = _xy(fit, feature_cols, target_col)
+    X_cal, y_cal = _xy(calib, feature_cols, target_col)
+    X_test, y_test = _xy(test, feature_cols, target_col)
 
     models = {}
     for q in quantiles:
@@ -102,19 +126,29 @@ def train_quantile_models(train: pd.DataFrame, test: pd.DataFrame, horizon: int,
             subsample=0.8, colsample_bytree=0.8,
             random_state=42, verbosity=-1,
         )
-        m.fit(X_train, y_train, eval_set=[(X_test, y_test)],
+        m.fit(X_fit, y_fit, eval_set=[(X_cal, y_cal)],
               callbacks=[lgb.early_stopping(30, verbose=False)])
         models[q] = m
 
-    # empirical coverage: what fraction of actuals actually fall in the interval.
-    # if this is far from the nominal 80%, the intervals are miscalibrated and
-    # shouldn't be presented as confidence bands without saying so.
-    lo = models[quantiles[0]].predict(X_test)
-    hi = models[quantiles[1]].predict(X_test)
-    coverage = float(((y_test >= lo) & (y_test <= hi)).mean())
+    def band(X):
+        a, b = models[quantiles[0]].predict(X), models[quantiles[1]].predict(X)
+        return np.minimum(a, b), np.maximum(a, b)
 
-    return {"models": models, "coverage": coverage,
-            "nominal": quantiles[1] - quantiles[0]}
+    nominal = quantiles[1] - quantiles[0]
+    lo_c, hi_c = band(X_cal)
+    y_c = y_cal.to_numpy()
+    scores = np.maximum(lo_c - y_c, y_c - hi_c)
+    n = len(scores)
+    level = min(1.0, np.ceil((n + 1) * nominal) / n)
+    offset = float(np.quantile(scores, level, method="higher"))
+
+    lo_t, hi_t = band(X_test)
+    y_t = y_test.to_numpy()
+    raw_cov = float(((y_t >= lo_t) & (y_t <= hi_t)).mean())
+    cal_cov = float(((y_t >= lo_t - offset) & (y_t <= hi_t + offset)).mean())
+
+    return {"models": models, "coverage": cal_cov, "coverage_raw": raw_cov,
+            "offset": offset, "nominal": nominal}
 
 
 def compute_shap_summary(model, X_test: pd.DataFrame, top_n: int = 10) -> list:
@@ -128,10 +162,11 @@ def compute_shap_summary(model, X_test: pd.DataFrame, top_n: int = 10) -> list:
 def main():
     os.makedirs(MODEL_DIR, exist_ok=True)
     df = pd.read_csv(FEATURES_PATH, parse_dates=["timestamp"])
-    train, test = time_aware_split(df)
+    fit, calib, test = time_aware_split(df)
 
-    print(f"Train: {len(train)} rows ({train['timestamp'].min()} to {train['timestamp'].max()})")
-    print(f"Test:  {len(test)} rows ({test['timestamp'].min()} to {test['timestamp'].max()})\n")
+    for name, part in (("Fit  ", fit), ("Calib", calib), ("Test ", test)):
+        print(f"{name}: {len(part)} rows ({part['timestamp'].min()} to {part['timestamp'].max()})")
+    print()
 
     results = {}
     for horizon in HORIZONS:
@@ -140,15 +175,16 @@ def main():
         baseline_metrics = naive_persistence_baseline(test, horizon)
         print(f"  Naive baseline   MAE={baseline_metrics['mae']:.2f}  RMSE={baseline_metrics['rmse']:.2f}")
 
-        model, model_metrics, feature_cols, X_test = train_lightgbm(train, test, horizon)
+        model, model_metrics, feature_cols, X_test = train_lightgbm(fit, calib, test, horizon)
         print(f"  LightGBM         MAE={model_metrics['mae']:.2f}  RMSE={model_metrics['rmse']:.2f}")
 
         improvement = (baseline_metrics["mae"] - model_metrics["mae"]) / baseline_metrics["mae"] * 100
         print(f"  Improvement over baseline: {improvement:.1f}%\n")
 
-        quantile_result = train_quantile_models(train, test, horizon)
-        print(f"  Interval coverage: {quantile_result['coverage']:.1%} "
-              f"(nominal {quantile_result['nominal']:.0%})")
+        quantile_result = train_quantile_models(fit, calib, test, horizon)
+        print(f"  Interval coverage: raw {quantile_result['coverage_raw']:.1%} -> "
+              f"calibrated {quantile_result['coverage']:.1%} "
+              f"(nominal {quantile_result['nominal']:.0%}, offset {quantile_result['offset']:+.1f})")
 
         top_features = compute_shap_summary(model, X_test)
 
@@ -163,6 +199,8 @@ def main():
             "model": model_metrics,
             "improvement_pct": improvement,
             "interval_coverage": quantile_result["coverage"],
+            "interval_coverage_raw": quantile_result["coverage_raw"],
+            "interval_offset": quantile_result["offset"],
             "interval_nominal": quantile_result["nominal"],
             "top_features": top_features,
             "feature_cols": feature_cols,

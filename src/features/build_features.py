@@ -47,8 +47,15 @@ def load_and_pivot_cpcb(path: str = f"{RAW_DIR}/cpcb_history.csv") -> pd.DataFra
     # composite AQI proxy: in a real submission, use the official CPCB sub-index
     # breakpoint formula (piecewise linear per pollutant) rather than this mean —
     # this is a placeholder so the pipeline runs end-to-end
-    pollutant_cols = [c for c in pivoted.columns if c not in ("city", "last_update")]
-    pivoted["aqi_proxy"] = pivoted[pollutant_cols].mean(axis=1)
+    if "AQI" in pivoted.columns:
+        # real-data path: backfill_real.py already computed the CPCB
+        # breakpoint AQI per hour. Use it as the target and keep it OUT of the
+        # feature columns (it would be a copy of the target).
+        pivoted["aqi_proxy"] = pivoted.pop("AQI")
+    else:
+        # synthetic-data path: mean of pollutant averages (placeholder)
+        pollutant_cols = [c for c in pivoted.columns if c not in ("city", "last_update")]
+        pivoted["aqi_proxy"] = pivoted[pollutant_cols].mean(axis=1)
 
     return pivoted.rename(columns={"last_update": "timestamp"})
 
@@ -76,11 +83,35 @@ def load_firms_daily_counts(path: str = f"{RAW_DIR}/firms_history.csv") -> pd.Da
     if not os.path.exists(path):
         return pd.DataFrame(columns=["date", "fire_count", "fire_mean_frp"])
     df = pd.read_csv(path, parse_dates=["acq_date"])
+    # the collector re-fetches overlapping 24h windows, so the same detection
+    # appears many times; count each physical detection once
+    dedupe_cols = [c for c in ("latitude", "longitude", "acq_date", "acq_time") if c in df.columns]
+    df = df.drop_duplicates(subset=dedupe_cols)
     daily = df.groupby("acq_date").agg(
         fire_count=("frp", "count"),
         fire_mean_frp=("frp", "mean"),
     ).reset_index().rename(columns={"acq_date": "date"})
     return daily
+
+
+def fill_hourly_grid(df: pd.DataFrame) -> pd.DataFrame:
+    """Give every city a complete hourly timeline (missing hours become NaN rows).
+
+    The lag/rolling/target features shift by ROW. If the source has holes
+    (e.g. OpenWeatherMap history skipping a day), a row shift of 24 would
+    silently mean "24 rows ago", not "24 hours ago", mislabelling every row
+    near a hole. Reindexing to a full grid makes shifts mean clock time; hours
+    that are truly missing stay NaN and are dropped from training by the
+    target/baseline dropna calls downstream.
+    """
+    parts = []
+    for city, g in df.groupby("city"):
+        full = pd.date_range(g["timestamp"].min(), g["timestamp"].max(), freq="h")
+        g = g.drop_duplicates("timestamp").set_index("timestamp").reindex(full)
+        g["city"] = city
+        g.index.name = "timestamp"
+        parts.append(g.reset_index())
+    return pd.concat(parts, ignore_index=True)
 
 
 def add_lag_and_rolling_features(df: pd.DataFrame, target_col: str = "aqi_proxy") -> pd.DataFrame:
@@ -131,6 +162,7 @@ def build_feature_table() -> pd.DataFrame:
         merged["fire_mean_frp"] = merged["fire_mean_frp"].fillna(0)
         merged = merged.drop(columns=["date"])
 
+    merged = fill_hourly_grid(merged)
     merged = add_lag_and_rolling_features(merged)
     merged = add_calendar_features(merged)
     merged = add_forecast_targets(merged)

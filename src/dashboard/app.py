@@ -105,7 +105,7 @@ try:
 except FileNotFoundError:
     st.error(
         "No trained models or features found. Run this first:\n\n"
-        "```\npython src/ingestion/generate_synthetic.py\n"
+        "```\npython src/ingestion/backfill_real.py\n"
         "python src/features/build_features.py\n"
         "python src/models/train_forecast.py\n```\n\n"
         "Also make sure you're running streamlit from the project root."
@@ -115,9 +115,13 @@ except FileNotFoundError:
 city = st.sidebar.selectbox("City", sorted(all_forecasts.keys()))
 st.sidebar.markdown("---")
 st.sidebar.caption(
-    "**Data source check:** if `data/raw/` was built by "
-    "`generate_synthetic.py`, everything below is synthetic and is for "
-    "pipeline validation only — not a real air quality forecast."
+    "**About the data:** pollutant levels are *modelled estimates* from the "
+    "OpenWeatherMap Air Pollution API, not CPCB station readings; weather is "
+    "from Open-Meteo. AQI is computed hourly with the CPCB breakpoint formula, "
+    "so it differs from the official 24-hour AQI. The model was trained on "
+    "Jul–Oct 2026 only (no winter data yet), so pollution spikes outside that "
+    "range may be under-predicted. Treat this as a research prototype, not "
+    "health advice."
 )
 
 # ── header ─────────────────────────────────────────────────────────────────
@@ -194,9 +198,12 @@ with st.expander("Model performance"):
             "Interval coverage": f"{m.get('interval_coverage', 0):.1%}",
         })
     st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
+    avg_cov = sum(metrics[f"{h}h"].get("interval_coverage", 0) for h in [24, 48, 72]) / 3
     st.caption(
-        "Baseline is naive persistence (assume AQI stays where it is). "
-        "Interval coverage is the share of actuals that fell inside the 80% "
-        "band on the test set — currently running a few points under nominal, "
-        "so the bands are slightly narrower than advertised."
+        "Baseline is naive persistence (assume AQI stays where it is); a negative "
+        "Improvement means the model did not beat it at that horizon. "
+        "Interval coverage is the share of actuals that fell inside the nominal "
+        f"80% band on the held-out test period — about {avg_cov:.0%} here, so the "
+        "bands are narrower than advertised because conditions shifted between "
+        "the calibration and test periods."
     )

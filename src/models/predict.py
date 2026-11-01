@@ -87,6 +87,9 @@ def forecast_city(row: pd.Series, results: dict) -> list:
         pred = float(point.predict(X)[0])
         lo = float(p10.predict(X)[0])
         hi = float(p90.predict(X)[0])
+        # conformal calibration learned in train_forecast.py (0.0 for old artifacts)
+        offset = float(meta.get("interval_offset", 0.0))
+        lo, hi = min(lo, hi) - offset, max(lo, hi) + offset
 
         # per-prediction SHAP: why THIS forecast, not global importance
         explainer = shap.TreeExplainer(point)
@@ -106,7 +109,7 @@ def forecast_city(row: pd.Series, results: dict) -> list:
         out.append({
             "horizon_h": horizon,
             "prediction": round(pred, 1),
-            "lower": round(min(lo, hi), 1),
+            "lower": round(max(min(lo, hi), 0.0), 1),
             "upper": round(max(lo, hi), 1),
             "interval_coverage": meta.get("interval_coverage"),
             "drivers": drivers,
